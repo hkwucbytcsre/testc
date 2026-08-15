@@ -51,8 +51,6 @@
 
 static_assert(sizeof(struct hmbird_entity) == HOTFIX_ENTITY_SIZE);
 static_assert(sizeof(struct module) == HOTFIX_MODULE_SIZE);
-static_assert(__same_type(((struct task_struct *)0)->android_oem_data1[HMBIRD_TS_IDX],
-			  struct hmbird_entity *));
 
 struct hotfix_instance_data {
 	struct task_struct *task;
@@ -96,6 +94,7 @@ static int hotfix_return_common(struct kretprobe_instance *ri,
 	struct hotfix_instance_data *data = (void *)ri->data;
 	struct hmbird_entity *ent;
 	struct task_struct *task;
+	unsigned long old_ptr;
 
 	(void)regs;
 	task = READ_ONCE(data->task);
@@ -105,11 +104,12 @@ static int hotfix_return_common(struct kretprobe_instance *ri,
 	}
 
 	/* HMBIRD stores the entity pointer in android_oem_data1[HMBIRD_TS_IDX] */
-	ent = READ_ONCE(task->android_oem_data1[HMBIRD_TS_IDX]);
-	if (!ent) {
+	old_ptr = READ_ONCE(task->android_oem_data1[HMBIRD_TS_IDX]);
+	if (!old_ptr) {
 		atomic64_inc(&counters.skipped_null);
 		return 0;
 	}
+	ent = (struct hmbird_entity *)old_ptr;
 
 	if (unlikely(READ_ONCE(ent->task) != task)) {
 		atomic64_inc(&counters.owner_mismatch);
@@ -119,7 +119,7 @@ static int hotfix_return_common(struct kretprobe_instance *ri,
 	}
 
 	if (unlikely(cmpxchg(&task->android_oem_data1[HMBIRD_TS_IDX],
-			     ent, NULL) != ent)) {
+			     old_ptr, 0) != old_ptr)) {
 		atomic64_inc(&counters.claim_race);
 		return 0;
 	}

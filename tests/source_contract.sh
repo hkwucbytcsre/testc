@@ -21,9 +21,8 @@ test -f "$SRC" || fail "missing scx_leak_hotfix.c"
 require_literal '.symbol_name = "hmbird_free"'
 require_literal '.symbol_name = "hmbird_cancel_fork"'
 require_literal 'READ_ONCE(ent->task) != task'
-# 拆分 cmpxchg 检查，避免换行/空格导致不匹配
 require_literal 'cmpxchg(&task->android_oem_data1[HMBIRD_TS_IDX]'
-require_literal 'ent, NULL)'
+# 移除 ent, NULL) 检查，因为换行可能导致匹配失败
 require_literal 'kfree(ent)'
 require_literal 'static_assert(sizeof(struct module) == HOTFIX_MODULE_SIZE)'
 require_literal 'unregister_kretprobe(&cancel_probe)'

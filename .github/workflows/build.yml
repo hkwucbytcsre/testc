@@ -20,7 +20,7 @@ on:
 
 env:
   KERNEL_REPO: OnePlusOSS/android_kernel_common_oneplus_sm8750
-  VENDOR_REPO: OnePlusOSS/android_kernel_oneplus_sm8750
+  VENDOR_REPO: OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8750
   KERNEL_BRANCH: oneplus/sm8750_b_16.0.0_oneplus_13
   KERNEL_REF: ${{ github.event.inputs.kernel_ref || 'e1b346b6b4f4096eb342ae3684838a942fd6f6c4' }}
   CLANG_VERSION: clang-r510928
@@ -149,7 +149,8 @@ jobs:
         run: |
           export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
           make KDIR="$GITHUB_WORKSPACE/kernel" ARCH=arm64 LLVM=1 \
-              KCFLAGS="-DCONFIG_HMBIRD_SCHED"
+            KCFLAGS="-DCONFIG_SLIM_SCHED -DCONFIG_SCHED_CLASS_EXT -DCONFIG_HMBIRD_SCHED" \
+            LOCALVERSION=
           ls -la scx_leak_hotfix.ko
 
       - name: Verify vermagic

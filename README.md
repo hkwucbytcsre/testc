@@ -18,18 +18,21 @@ measured as ~102% growth, i.e. essentially exact 1:1 leakage.
 
 ## The fix
 
-Two symbol-based kretprobes run *after* the vendor's original cleanup returns,
-so the module never races or duplicates existing work. Each return handler:
+The module registers one callback on Android's exported
+`android_vh_free_task` vendor hook. The hook is inside `free_task()`, after
+`sched_ext_free()` on normal teardown and after `scx_cancel_fork()` on failed
+fork teardown, but before the `task_struct` itself is freed. The callback:
 
-1. recovers the `task_struct *` its entry handler saved from `regs->regs[0]`
+1. receives the final `task_struct *` directly from `free_task()`
 2. reads `p->scx` with `READ_ONCE()`, skipping NULL
 3. verifies `scx->task == p` — ownership and layout sanity in one check
 4. claims the pointer with `cmpxchg(&p->scx, scx, NULL)`
 5. calls `kfree(scx)` only after the claim succeeds
 
-No allocation, no sleeping, no slab scanning, no text patching, no hardcoded
-addresses or offsets. Unexpected states increment a counter and, for ownership
-mismatches, emit a rate-limited warning.
+No kprobe, return-stack rewriting, allocation, sleeping, slab scanning, text
+patching, or hardcoded addresses/offsets. The single static-key trace hook runs
+once at final task destruction, not on general syscall paths. Unexpected states
+increment a counter and ownership mismatches emit a rate-limited warning.
 
 The module does not reclaim objects orphaned by tasks that died before it was
 loaded. It only prevents new leaks.
@@ -161,8 +164,8 @@ cat /sys/kernel/debug/scx_leak_hotfix/stats
 not match the running kernel. That is the intended fail-closed behaviour.
 
 debugfs being unmounted does not disable the fix. `debugfs_create_dir()`
-returns a placeholder rather than an error, so the probes still run; only the
-stats file is missing.
+returns a placeholder rather than an error, so the vendor hook still runs;
+only the stats file is missing.
 
 ## Verify
 
@@ -177,10 +180,9 @@ ratio should be near 100%, then near 0% once loaded.
 
 Acceptance criteria for a deployment:
 
-- both probes registered (module reaches `Live`)
+- `android_vh_free_task` registered (module reaches `Live`)
 - `owner_mismatch` stays 0
-- `normal_nmissed` and `cancel_nmissed` stay 0
-- free counters climb in step with task creation
+- `hook_calls` and `freed` climb in step with task creation
 - `kmalloc-256` no longer grows ~1 object per task
 - no `BUG:`, `Oops`, UAF, double-free, slab corruption or RCU stall in dmesg
 
@@ -188,18 +190,13 @@ Acceptance criteria for a deployment:
 
 | Field | Meaning |
 |---|---|
-| `active` | Probes registered |
-| `freed_normal` | Entities freed on the `sched_ext_free` path |
-| `freed_cancel` | Entities freed on the `scx_cancel_fork` path |
+| `active` | Android vendor hook registered |
+| `hook_calls` | Final task-free callbacks observed |
+| `freed` | Owned SCX entities freed |
 | `skipped_null` | `p->scx` already NULL, nothing to do |
 | `owner_mismatch` | `scx->task != p`; refused to free. Must stay 0 |
 | `claim_race` | Lost the `cmpxchg`; another actor claimed it |
-| `bad_task` | No task pointer in probe context |
-| `normal_nmissed` / `cancel_nmissed` | kretprobe misses; raise `maxactive` if nonzero |
-
-`freed_cancel` staying 0 is normal — fork failures are rare, and on this kernel
-`copy_process()` reaches `free_task()` after `sched_cancel_fork()`, so the
-`sched_ext_free` probe covers most of that path anyway.
+| `bad_task` | Vendor hook supplied no task pointer |
 
 ## Removal
 
@@ -211,14 +208,24 @@ Unloading resumes the leak for tasks created afterwards. For production, load
 early from post-fs-data and leave it resident. `rmmod` is for development
 validation.
 
-## Measured results
+## Verification status
 
-3000 `/bin/true` invocations on the target device:
+The vendor-hook v2 artifact has passed static and on-device verification:
+
+- `sizeof(struct module) == 1088`
+- exact target vermagic
+- all 19 imported symbol CRCs match
+- all undefined symbols are target-kernel exports
+- no kprobe/kretprobe dependency
+
+Controlled `/bin/true` task churn on the target device:
 
 | State | Tasks created | kmalloc-256 growth | Leak ratio |
 |---|---|---|---|
-| Unloaded | 3045 | +3098 | ~102% |
-| Loaded | 3195 | -14 | 0% |
+| Unloaded v1 baseline | 3045 | +3098 | ~102% |
+| Vendor-hook v2, first run | 3518 | +155 | 4% |
+| Vendor-hook v2, long run | 10096 | -64 | 0% |
 
-Across 10359 tasks with the module loaded, growth was +5 objects, with all
-error counters at zero.
+After the long run, v2 reported `hook_calls 20313` and `freed 20313`, with
+`skipped_null`, `owner_mismatch`, `claim_race`, and `bad_task` all zero. No
+kprobe entries, kernel anomaly lines, or pstore crash record were present.

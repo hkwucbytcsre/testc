@@ -63,8 +63,8 @@ of `struct module` in this tree, so the size is unaffected.
 |---|---|---|
 | `CONFIG_SLIM_SCHED` | `y` | Gates the vendor `sched_ext` fork paths |
 | `CONFIG_SCHED_CLASS_EXT` | `y` | `sched_ext` present |
-| `CONFIG_KPROBES` | `y` | Probe mechanism |
-| `CONFIG_KRETPROBES` | `y` | Return probes; the fix runs after the original cleanup |
+| `CONFIG_TRACEPOINTS` | `y` | Android vendor-hook transport |
+| `CONFIG_ANDROID_VENDOR_HOOKS` | `y` | Exposes `android_vh_free_task` |
 | `CONFIG_MODVERSIONS` | `y` | Symbol CRCs must match the target exactly |
 | `CONFIG_MODULE_SIG_FORCE` | not set | Unsigned modules load |
 | `CONFIG_CFI_CLANG` | `y` | KCFI; indirect-call type ids must agree |
@@ -79,6 +79,34 @@ susfs rewrites the `uname()` syscall to return the upstream GKI string
 `/proc/sys/kernel/osrelease` and `/proc/version`, and the module compares
 against its own compile-time `UTS_RELEASE`. Any tooling that gates on
 `uname -r` will produce a false mismatch.
+
+## Hook Lifecycle
+
+The production module uses the exported `android_vh_free_task` vendor hook,
+not kprobes. Its location in generic task teardown is intentional:
+
+```text
+normal exit:
+  __put_task_struct()
+    sched_ext_free(task)
+    free_task(task)
+      trace_android_vh_free_task(task) -> module callback
+      free_task_struct(task)
+
+failed fork:
+  sched_cancel_fork(task)
+    scx_cancel_fork(task)
+  delayed_free_task(task)
+    free_task(task)
+      trace_android_vh_free_task(task) -> module callback
+      free_task_struct(task)
+```
+
+Thus both SCX cleanup paths have completed, while `task` and `task->scx` are
+still addressable. The callback validates `scx->task == task`, atomically
+changes `task->scx` to NULL, then frees the owned allocation. Hook removal is
+followed by `tracepoint_synchronize_unregister()` so module text cannot be
+freed while a callback is still running.
 
 ## ABI Facts
 
@@ -133,7 +161,7 @@ recovered from the image's `__ksymtab`/`__kcrctab` sections instead:
 |---|---|
 | Exported symbols recovered | 15242 |
 | Address cross-check vs kallsyms | 15242/15242 |
-| Imported by this module | 15, all matching |
+| Imported by vendor-hook v2 | 19, all matching |
 
 Two config facts make this work: `CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y` on
 arm64, so each `kernel_symbol` is three self-relative `s32` offsets rather than
@@ -156,15 +184,20 @@ leaks per created task.
 `scx->task` back-pointing at the owning `task_struct` is what makes the fix
 safe: the module verifies ownership before freeing.
 
-## Measured Behaviour
+## Verification Status
+
+The vendor-hook v2 artifact is build-, ABI-, and runtime-verified. Its 19
+symbol CRCs match the target and its only hook-specific imports are the
+exported `android_vh_free_task` tracepoint plus tracepoint registration APIs.
 
 3000 `/bin/true` invocations, `kmalloc-256` active object delta:
 
 | State | Tasks created | kmalloc-256 growth | Leak ratio |
 |---|---|---|---|
-| Module unloaded | 3045 | +3098 | ~102% |
-| Module loaded | 3195 | -14 | 0% |
+| Unloaded v1 baseline | 3045 | +3098 | ~102% |
+| Vendor-hook v2, first run | 3518 | +155 | 4% |
+| Vendor-hook v2, long run | 10096 | -64 | 0% |
 
-Over 10359 tasks with the module loaded, growth was +5 objects. Counters
-throughout: `owner_mismatch 0`, `claim_race 0`, `bad_task 0`,
-`normal_nmissed 0`, `cancel_nmissed 0`. No kernel anomaly lines.
+After the long run v2 had processed and freed 20313 entities. All safety
+counters were zero; the kprobe list contained no hotfix entries, pstore was
+empty, and no kernel anomaly was observed.

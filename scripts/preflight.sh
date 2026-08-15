@@ -3,7 +3,7 @@
 # Exits non-zero on any FAIL so callers can refuse to load the module.
 set -u
 
-TARGET_RELEASE="6.6.118-android15-8-g29d86c5fc9dd-abogki428889875-4k"
+TARGET_RELEASE="6.1.115-android14-oki-xiaoxiaow"
 KO="${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/scx_leak_hotfix.ko}"
 
 fails=0
@@ -19,7 +19,11 @@ aarch64) pass "arch $arch" ;;
 *) fail "arch $arch, expected aarch64" ;;
 esac
 
-# 2. Kernel release.
+# 2. Kernel release.  Do not trust `uname -r`: CONFIG_KSU_SUSFS_SPOOF_UNAME
+#    rewrites the uname() syscall to report an upstream GKI string.  The
+#    procfs sources below are not spoofed, and the module itself compares
+#    against its compile-time UTS_RELEASE, so those are the authoritative
+#    values to check.
 release=$(cat /proc/sys/kernel/osrelease 2>/dev/null)
 if [ -z "$release" ]; then
 	release=$(awk '{print $3}' /proc/version 2>/dev/null)
@@ -34,9 +38,9 @@ if [ "$spoofed" != "$release" ]; then
 	info "uname -r reports '$spoofed' (susfs spoofing; ignored)"
 fi
 
-# 3. Target symbols must be present and not inlined away.
-# HMBIRD uses hmbird_free and hmbird_cancel_fork instead of SCX symbols.
-for sym in hmbird_free hmbird_cancel_fork; do
+# 3. The Android vendor hook and its registration API must be present.
+for sym in __tracepoint_android_vh_free_task tracepoint_probe_register \
+	tracepoint_probe_unregister; do
 	if grep -qE " $sym\$" /proc/kallsyms 2>/dev/null; then
 		pass "symbol $sym resolvable"
 	else
@@ -47,9 +51,8 @@ done
 # 4. Kernel configuration, when readable.
 if [ -r /proc/config.gz ]; then
 	cfg=$(zcat /proc/config.gz 2>/dev/null)
-	# HMBIRD uses CONFIG_HMBIRD_SCHED instead of CONFIG_SLIM_SCHED/CONFIG_SCHED_CLASS_EXT
-	for opt in CONFIG_HMBIRD_SCHED CONFIG_KPROBES \
-		CONFIG_KRETPROBES CONFIG_MODVERSIONS; do
+	for opt in CONFIG_SLIM_SCHED CONFIG_SCHED_CLASS_EXT CONFIG_TRACEPOINTS \
+		CONFIG_ANDROID_VENDOR_HOOKS CONFIG_MODVERSIONS; do
 		if printf '%s\n' "$cfg" | grep -q "^${opt}=y"; then
 			pass "$opt=y"
 		else

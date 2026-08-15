@@ -27,7 +27,7 @@ printf 'module loaded : %s\n' "$loaded"
 printf 'tasks         : %s\n\n' "$TASKS"
 
 if [ -r "$STATS" ]; then
-	freed_before=$(awk '/^freed_normal /{print $2}' "$STATS")
+	freed_before=$(awk '/^freed /{print $2}' "$STATS")
 else
 	freed_before=""
 fi
@@ -73,7 +73,7 @@ if [ "$dp" -gt 0 ]; then
 fi
 
 if [ -r "$STATS" ]; then
-	freed_after=$(awk '/^freed_normal /{print $2}' "$STATS")
+	freed_after=$(awk '/^freed /{print $2}' "$STATS")
 	printf 'freed this run     : %d\n' "$((freed_after - freed_before))"
 	printf '\n--- %s ---\n' "$STATS"
 	cat "$STATS"

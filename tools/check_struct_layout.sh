@@ -12,7 +12,7 @@
 #
 # Example:
 #   tools/check_struct_layout.sh /path/to/kernel module
-#   tools/check_struct_layout.sh /path/to/kernel hmbird_entity
+#   tools/check_struct_layout.sh /path/to/kernel sched_ext_entity
 #
 # Requires: bpftool (for the target BTF), clang, python3, and a kernel tree
 # already through `make modules_prepare`.
@@ -74,7 +74,7 @@ mkdir -p "$WORK/probe"
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
-#include <linux/sched/hmbird.h>
+#include <linux/sched/ext.h>
 EOF
 	# clang only dumps layouts for types it is forced to complete, so take the
 	# size of the requested struct explicitly.

@@ -1,5 +1,7 @@
 # OnePlus / Oplus SCX per-task 内存泄漏 LKM Hotfix 实现规范
 
+> **实现状态（2026-08-10）：** 本文保留最初的双 kretprobe 方案作为历史设计记录。生产版 v2 已改用目标内核导出的 `android_vh_free_task` vendor hook，在 `free_task()` 的统一最终释放点回收 `task->scx`；不再依赖 kprobe/kretprobe。当前实现与验证要求以 `README.md` 和 `docs/superpowers/specs/2026-08-08-scx-leak-hotfix-design.md` 为准。
+
 > 文档用途：交给编码智能体/内核开发者实现一个 **Loadable Kernel Module (LKM)**，在不重编整颗内核的前提下，为 OnePlus/Oplus 部分 `CONFIG_SLIM_SCHED + sched_ext/SCX` 内核补上 `task_struct::scx` 的缺失释放逻辑。
 >
 > 首要目标平台：**OnePlus MT6989 / Ace 5 竞速版对应源码分支**

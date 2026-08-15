@@ -90,7 +90,7 @@ fi
 printf '\n=== layout-critical options ===\n'
 for opt in CONFIG_MODVERSIONS CONFIG_MODULE_SIG_FORCE CONFIG_DEBUG_INFO_BTF \
 	CONFIG_DEBUG_INFO_BTF_MODULES CONFIG_CFI_CLANG CONFIG_LTO_NONE \
-	CONFIG_KPROBES CONFIG_KRETPROBES; do
+	CONFIG_TRACEPOINTS CONFIG_ANDROID_VENDOR_HOOKS; do
 	value=$(grep -E "^${opt}=" "$OUTDIR/target.config" || true)
 	printf '%-34s %s\n' "$opt" "${value:-not set}"
 done

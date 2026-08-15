@@ -16,8 +16,9 @@ objects.
   `6.1.115-android14-oki-xiaoxiaow`
 - Target image: `/root/scx-memlf/vmlinux`
 - Target configuration confirms `CONFIG_SLIM_SCHED=y`,
-  `CONFIG_SCHED_CLASS_EXT=y`, `CONFIG_KPROBES=y`, `CONFIG_KRETPROBES=y`,
-  `CONFIG_MODVERSIONS=y`, `CONFIG_CFI_CLANG=y`, and `CONFIG_DEBUG_FS=y`.
+  `CONFIG_SCHED_CLASS_EXT=y`, `CONFIG_TRACEPOINTS=y`,
+  `CONFIG_ANDROID_VENDOR_HOOKS=y`, `CONFIG_MODVERSIONS=y`,
+  `CONFIG_CFI_CLANG=y`, and `CONFIG_DEBUG_FS=y`.
 - The supplied `vmlinux` is an ARM64 kernel `Image`, not an ELF `vmlinux`.
   It is useful for release/config/image validation but is not sufficient by
   itself to build a loadable module.
@@ -32,15 +33,13 @@ and initializes `scx->task = p`. The target `scx_cancel_fork()` and
 
 ## Architecture
 
-The module registers two symbol-based kretprobes:
+The module registers one callback on Android's exported
+`android_vh_free_task` vendor hook. `free_task()` invokes this hook after
+`sched_ext_free()` on normal task teardown and after `scx_cancel_fork()` on a
+failed fork, but before releasing the `task_struct` itself. This provides one
+common, final lifecycle point without return probes or text patching.
 
-1. `sched_ext_free`: the return handler runs after the original SCX teardown
-   and before `__put_task_struct()` continues.
-2. `scx_cancel_fork`: the return handler runs after the original fork-cancel
-   cleanup and before the remaining failed-fork cleanup.
-
-Each probe entry handler stores only the first arm64 argument (`regs->regs[0]`)
-in its per-instance context. Each return handler then:
+The callback:
 
 1. Rejects a missing task pointer.
 2. Reads `p->scx` with `READ_ONCE()`.
@@ -48,33 +47,36 @@ in its per-instance context. Each return handler then:
 4. Verifies `scx->task == p` as an ownership/layout sanity check.
 5. Claims the pointer with `cmpxchg(&p->scx, scx, NULL)`.
 6. Calls `kfree(scx)` only after the atomic claim succeeds.
-7. Increments the path-specific counter.
+7. Increments the free counter.
 
-The handlers do not allocate, sleep, scan slabs, patch kernel text, use
+The callback does not allocate, sleep, scan slabs, patch kernel text, use
 absolute addresses, or log per task. Unexpected ownership mismatches use
-rate-limited warnings only.
+rate-limited warnings only. It runs once per final task destruction, not on
+general syscall paths.
 
 ## ABI And Fail-Closed Policy
 
 The module is intentionally not a generic SCX module. Build-time guards require
-arm64, `CONFIG_SLIM_SCHED`, `CONFIG_SCHED_CLASS_EXT`, `CONFIG_KPROBES`, and
-`CONFIG_KRETPROBES`. The MT6989 profile additionally checks the expected
-`struct sched_ext_entity` size from the exact source build.
+arm64, `CONFIG_SLIM_SCHED`, `CONFIG_SCHED_CLASS_EXT`, `CONFIG_TRACEPOINTS`, and
+`CONFIG_ANDROID_VENDOR_HOOKS`. The MT6989 profile additionally checks the
+expected `struct sched_ext_entity` and `struct module` sizes from the exact
+source build.
 
 Runtime preflight and module initialization reject a target when the required
 configuration, symbols, or module ABI metadata are unavailable. The module
 must be built using the exact target source branch, prepared generated headers,
 matching `.config`, matching `Module.symvers`, and the Android Clang/LLVM
-toolchain used for the target kernel. The checked-in `Image` alone cannot
-replace `Module.symvers`.
+toolchain used for the target kernel. This repository includes a
+`Module.symvers` reconstructed from the target image's export and CRC tables.
 
-No fallback to entry-point freeing is implemented when kretprobes are absent.
+No fallback to kprobe, ftrace, or text-patch hooks is implemented when the
+Android vendor hook is absent.
 No attempt is made to reclaim objects belonging to tasks that died before the
 module was loaded.
 
 ## Module Components
 
-- `scx_leak_hotfix.c`: kretprobe handlers, transactional registration,
+- `scx_leak_hotfix.c`: vendor-hook callback, transactional registration,
   counters, debugfs stats, and module metadata.
 - `Makefile`: external-module build using `KDIR`, `O`, `LLVM`, and `ARCH`.
 - `README.md`: exact build prerequisites, load/unload commands, deployment
@@ -93,21 +95,21 @@ module was loaded.
 
 ## Observability
 
-The module maintains atomic counters for normal frees, cancel frees, NULL
-skips, owner mismatches, claim races, and invalid task contexts. Debugfs stats
+The module maintains atomic counters for hook calls, frees, NULL skips, owner
+mismatches, claim races, and invalid task contexts. Debugfs stats
 are exposed at:
 
 `/sys/kernel/debug/scx_leak_hotfix/stats`
 
-The stats include both kretprobe `nmissed` values. A valid deployment requires
-both values to remain zero and `owner_mismatch` to remain zero during stress.
+A valid deployment requires `owner_mismatch`, `claim_race`, and `bad_task` to
+remain zero while `hook_calls` and `freed` increase during stress.
 
 ## Initialization And Removal
 
-Initialization performs checks before registering `sched_ext_free`, then
-registers `scx_cancel_fork`. If the second registration fails, the first is
-unregistered and initialization returns the error. Removal unregisters cancel
-first, then normal teardown, removes debugfs, and prints final counters.
+Initialization performs ABI checks, registers `android_vh_free_task`, then
+creates debugfs. A debugfs failure rolls back the hook registration. Removal
+unregisters the hook, calls `tracepoint_synchronize_unregister()`, removes
+debugfs, and prints final counters.
 
 Production deployment keeps the module resident and loads it early from
 post-fs-data. `rmmod` is for development validation only; unloading resumes
@@ -120,16 +122,15 @@ Static verification checks source symbols, config guards, absence of hardcoded
 addresses/offsets, and shell syntax. Build verification uses the exact
 prepared kernel output and checks `modinfo`. Runtime verification requires:
 
-- both probes registered;
+- the Android vendor hook registered;
 - five-minute task churn without warning, crash, UAF, double-free, slab/list
   corruption, or RCU stall;
 - `owner_mismatch == 0`;
-- both `nmissed` counters equal zero;
-- free counters increasing while tasks churn;
+- `hook_calls` and `freed` increasing while tasks churn;
 - `kmalloc-256` no longer growing approximately one object per created task;
 - longer reboot and early-load validation before production use.
 
-The current workspace does not yet contain the exact prepared output and
-`Module.symvers`, so local completion can include source/static validation and
-an explicit build-readiness result, but cannot honestly claim `insmod` or
-runtime acceptance until those target artifacts are supplied.
+The vendor-hook v2 artifact is build-, ABI-, and runtime-verified. A 10096-task
+run produced zero `kmalloc-256` growth and ended with 20313 successful frees,
+all safety counters at zero, no kprobe entries, no pstore record, and no kernel
+anomaly.

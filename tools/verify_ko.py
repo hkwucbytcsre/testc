@@ -28,9 +28,9 @@ KO = sys.argv[1]
 SYMVERS = sys.argv[2]
 EXPECTED_VERMAGIC = sys.argv[3] if len(sys.argv) > 3 else None
 
-# Section size that `struct module` must occupy on SM8750 HMBIRD kernel.
-# Confirmed by BTF: sizeof(struct module) = 1536.
-EXPECTED_MODULE_SIZE = 1536
+# Section size that `struct module` must occupy. See profiles/ for why this is
+# 1088 rather than 1072 on this target.
+EXPECTED_MODULE_SIZE = 1088
 
 failures = []
 
@@ -134,6 +134,8 @@ else:
     if not data:
         info("module has no __versions section (CONFIG_MODVERSIONS off?)")
     else:
+        # struct modversion_info { unsigned long crc; char name[MODULE_NAME_LEN]; }
+        # On arm64 that is 8 + 56 = 64 bytes, with the CRC in the low 4 bytes.
         matched = 0
         problems = 0
         for offset in range(0, len(data) - 63, 64):

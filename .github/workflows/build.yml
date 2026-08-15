@@ -148,9 +148,7 @@ jobs:
         working-directory: module
         run: |
           export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
-          make KDIR="$GITHUB_WORKSPACE/kernel" ARCH=arm64 LLVM=1 \
-            KCFLAGS="-DCONFIG_SLIM_SCHED -DCONFIG_SCHED_CLASS_EXT -DCONFIG_HMBIRD_SCHED" \
-            LOCALVERSION=
+          make KDIR="$GITHUB_WORKSPACE/kernel" ARCH=arm64 LLVM=1
           ls -la scx_leak_hotfix.ko
 
       - name: Verify vermagic

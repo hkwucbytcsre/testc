@@ -19,10 +19,10 @@ on:
         default: b1ea2c8ce2ef0f73927a593aa450f88143e3584a
 
 env:
-  KERNEL_REPO: OnePlusOSS/android_kernel_common_oneplus_sm8750
-  VENDOR_REPO: OnePlusOSS/android_kernel_oneplus_sm8750
+  KERNEL_REPO: cctv18/android_kernel_common_oneplus_sm8750
+  VENDOR_REPO: oneplus/sm8750_b_16.0.0_oneplus_13_6.6.118
   KERNEL_BRANCH: oneplus/sm8750_b_16.0.0_oneplus_13
-  KERNEL_REF: ${{ github.event.inputs.kernel_ref || 'e1b346b6b4f4096eb342ae3684838a942fd6f6c4' }}
+  KERNEL_REF: ${{ github.event.inputs.kernel_ref || '4adecf773de4580140b120843859bac06fb78bbd' }}
   CLANG_VERSION: clang-r510928
   KERNEL_BASE_VERSION: 6.6.118
   TARGET_RELEASE: 6.6.118-android15-8-g29d86c5fc9dd-abogki428889875-4k

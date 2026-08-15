@@ -13,7 +13,7 @@ LLVM ?= 1
 # the target kernel.
 KBUILD_ARGS := -C "$(KDIR)" M="$(CURDIR)" ARCH="$(ARCH)" LLVM="$(LLVM)" LOCALVERSION=
 
-TARGET_RELEASE := 6.1.115-android14-oki-xiaoxiaow
+TARGET_RELEASE := 6.6.118-android15-8-g29d86c5fc9dd-abogki428889875-4k
 TARGET_VERMAGIC := $(TARGET_RELEASE) SMP preempt mod_unload modversions aarch64
 
 .PHONY: all clean test verify check-layout extract preflight stress stats

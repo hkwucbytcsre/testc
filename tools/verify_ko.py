@@ -29,8 +29,8 @@ SYMVERS = sys.argv[2]
 EXPECTED_VERMAGIC = sys.argv[3] if len(sys.argv) > 3 else None
 
 # Section size that `struct module` must occupy. See profiles/ for why this is
-# 1088 rather than 1072 on this target.
-EXPECTED_MODULE_SIZE = 1088
+# 1088 rather than 1536 on this target.
+EXPECTED_MODULE_SIZE = 1536
 
 failures = []
 

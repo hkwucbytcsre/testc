@@ -3,7 +3,7 @@
 # Exits non-zero on any FAIL so callers can refuse to load the module.
 set -u
 
-TARGET_RELEASE="6.1.115-android14-oki-xiaoxiaow"
+TARGET_RELEASE="6.6.118-android15-8-g29d86c5fc9dd-abogki428889875-4k"
 KO="${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/scx_leak_hotfix.ko}"
 
 fails=0

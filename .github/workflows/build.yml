@@ -144,6 +144,35 @@ jobs:
             exit 1
           fi
 
+      - name: Apply fengchi_oneplus_13_b patch
+        run: |
+          # 进入内核源码根目录
+          cd kernel_workspace/common
+          
+          # 1. 克隆补丁仓库（浅克隆，只拉取 sm8750 分支）
+          git clone --depth=1 --branch sm8750 https://github.com/Numbersf/SCHED_PATCH.git
+          
+          # 2. 检查补丁文件是否存在
+          PATCH_FILE="SCHED_PATCH/fengchi_oneplus_13_b.patch"
+          if [ ! -f "$PATCH_FILE" ]; then
+            echo "::error::补丁文件 $PATCH_FILE 不存在"
+            exit 1
+          fi
+          
+          # 3. （可选）转换文件格式，防止因 Windows 换行符导致 patch 失败
+          dos2unix "$PATCH_FILE" || true
+          
+          # 4. 应用补丁（-p1 表示去除路径的第一级目录；-F 3 增加容错）
+          echo "正在应用 HMBIRD (完美风驰) 调度补丁..."
+          patch -p1 -F 3 < "$PATCH_FILE"
+          
+          # 5. 验证补丁是否成功应用（示例：检查是否存在标志性文件或代码）
+          if grep -q "hmbird_sched_class" kernel/sched/core.c; then
+            echo "✅ 补丁应用成功，检测到 hmbird_sched_class 符号"
+          else
+            echo "⚠️ 警告：未检测到补丁生效的标志，请检查"
+          fi
+
       - name: Build module
         working-directory: module
         run: |

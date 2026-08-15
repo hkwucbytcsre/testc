@@ -105,9 +105,9 @@ jobs:
         run: |
           mkdir -p toolchain
           curl -sSL --retry 5 --retry-delay 10 \
-            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/$CLANG_VERSION.tar.gz" \
-            -o clang.tar.gz
-          tar xzf clang.tar.gz -C toolchain
+            "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip" \
+            -o clang.zip
+          unzip -q clang.zip -d toolchain
           toolchain/bin/clang --version
 
       - name: Prepare kernel tree

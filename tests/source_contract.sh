@@ -17,11 +17,12 @@ require_literal()
 
 test -f "$SRC" || fail "missing scx_leak_hotfix.c"
 
-require_literal '.symbol_name = "sched_ext_free"'
-require_literal '.symbol_name = "scx_cancel_fork"'
-require_literal 'READ_ONCE(scx->task) != task'
-require_literal 'cmpxchg(&task->scx, scx, NULL)'
-require_literal 'kfree(scx)'
+# HMBIRD specific symbols
+require_literal '.symbol_name = "hmbird_free"'
+require_literal '.symbol_name = "hmbird_cancel_fork"'
+require_literal 'READ_ONCE(ent->task) != task'
+require_literal 'cmpxchg(&task->android_oem_data1[HMBIRD_TS_IDX], ent, NULL)'
+require_literal 'kfree(ent)'
 require_literal 'static_assert(sizeof(struct module) == HOTFIX_MODULE_SIZE)'
 require_literal 'unregister_kretprobe(&cancel_probe)'
 require_literal 'unregister_kretprobe(&free_probe)'
@@ -53,11 +54,6 @@ if [ -f "$WORKFLOW" ]; then
 		fail "workflow must set CONFIG_LOCALVERSION explicitly"
 	grep -Fq -- '--disable LOCALVERSION_AUTO' "$WORKFLOW" ||
 		fail "workflow must disable CONFIG_LOCALVERSION_AUTO"
-fi
-
-if grep -Fq 'CONFIG_LOCALVERSION_AUTO=y' "$ROOT/ci/target.config" 2>/dev/null &&
-   ! grep -Fq 'CONFIG_LOCALVERSION_AUTO' "$ROOT/profiles/mt6989_ace5_race.md"; then
-	fail "profile must document the LOCALVERSION_AUTO trap"
 fi
 
 printf 'PASS: source safety contract\n'

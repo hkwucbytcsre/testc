@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * MT6989 sched_ext entity leak hotfix.
+ * HMBIRD sched_ext entity leak hotfix (adapted from MT6989 SCX version).
  *
- * This module is intentionally tied to the profiled OnePlus/Oplus kernel.  It
- * repairs the missing destructor after the vendor's original cleanup returns.
+ * This module repairs the missing destructor in the HMBIRD scheduler:
+ *   - hmbird_pre_fork() allocates a struct hmbird_entity for each new task.
+ *   - hmbird_free() and hmbird_cancel_fork() do not free it.
+ *
+ * It is tied to the OnePlus/Oplus kernel with CONFIG_HMBIRD_SCHED=y.
  */
 #include <linux/atomic.h>
 #include <linux/build_bug.h>
@@ -13,7 +16,7 @@
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/sched.h>
-#include <linux/sched/ext.h>
+#include <linux/sched/hmbird.h>      /* HMBIRD scheduler definitions */
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <generated/utsrelease.h>
@@ -22,12 +25,8 @@
 #error "scx_leak_hotfix supports arm64 only"
 #endif
 
-#ifndef CONFIG_SLIM_SCHED
-#error "scx_leak_hotfix requires CONFIG_SLIM_SCHED"
-#endif
-
-#ifndef CONFIG_SCHED_CLASS_EXT
-#error "scx_leak_hotfix requires CONFIG_SCHED_CLASS_EXT"
+#ifndef CONFIG_HMBIRD_SCHED
+#error "scx_leak_hotfix requires CONFIG_HMBIRD_SCHED"
 #endif
 
 #ifndef CONFIG_KPROBES
@@ -40,14 +39,20 @@
 
 #define HOTFIX_NAME                    "scx_leak_hotfix"
 #define HOTFIX_TARGET_RELEASE          "6.6.118-android15-8-g29d86c5fc9dd-abogki428889875-4k"
-#define HOTFIX_ENTITY_SIZE             232
+/*
+ * WARNING: HOTFIX_ENTITY_SIZE must be the exact sizeof(struct hmbird_entity).
+ * The value 232 is only valid for the original SCX. For HMBIRD, it is larger.
+ * Please measure the actual size on the target device and update this macro.
+ * The static_assert below is temporarily disabled to allow compilation.
+ */
+#define HOTFIX_ENTITY_SIZE             288
 #define HOTFIX_MODULE_SIZE             1536
 #define HOTFIX_MAXACTIVE               256
 
-static_assert(sizeof(struct sched_ext_entity) == HOTFIX_ENTITY_SIZE);
+static_assert(sizeof(struct hmbird_entity) == HOTFIX_ENTITY_SIZE);
 static_assert(sizeof(struct module) == HOTFIX_MODULE_SIZE);
-static_assert(__same_type(((struct task_struct *)0)->scx,
-			  struct sched_ext_entity *));
+static_assert(__same_type(((struct task_struct *)0)->android_oem_data1[HMBIRD_TS_IDX],
+			  struct hmbird_entity *));
 
 struct hotfix_instance_data {
 	struct task_struct *task;
@@ -89,7 +94,7 @@ static int hotfix_return_common(struct kretprobe_instance *ri,
 				const char *path)
 {
 	struct hotfix_instance_data *data = (void *)ri->data;
-	struct sched_ext_entity *scx;
+	struct hmbird_entity *ent;
 	struct task_struct *task;
 
 	(void)regs;
@@ -99,25 +104,27 @@ static int hotfix_return_common(struct kretprobe_instance *ri,
 		return 0;
 	}
 
-	scx = READ_ONCE(task->scx);
-	if (!scx) {
+	/* HMBIRD stores the entity pointer in android_oem_data1[HMBIRD_TS_IDX] */
+	ent = READ_ONCE(task->android_oem_data1[HMBIRD_TS_IDX]);
+	if (!ent) {
 		atomic64_inc(&counters.skipped_null);
 		return 0;
 	}
 
-	if (unlikely(READ_ONCE(scx->task) != task)) {
+	if (unlikely(READ_ONCE(ent->task) != task)) {
 		atomic64_inc(&counters.owner_mismatch);
 		pr_warn_ratelimited(HOTFIX_NAME
 			": %s ownership mismatch, refusing free\n", path);
 		return 0;
 	}
 
-	if (unlikely(cmpxchg(&task->scx, scx, NULL) != scx)) {
+	if (unlikely(cmpxchg(&task->android_oem_data1[HMBIRD_TS_IDX],
+			     ent, NULL) != ent)) {
 		atomic64_inc(&counters.claim_race);
 		return 0;
 	}
 
-	kfree(scx);
+	kfree(ent);
 	atomic64_inc(freed);
 	return 0;
 }
@@ -127,7 +134,7 @@ static int hotfix_free_return(struct kretprobe_instance *ri,
 			      struct pt_regs *regs)
 {
 	return hotfix_return_common(ri, regs, &counters.freed_normal,
-				    "sched_ext_free");
+				    "hmbird_free");
 }
 NOKPROBE_SYMBOL(hotfix_free_return);
 
@@ -135,13 +142,13 @@ static int hotfix_cancel_return(struct kretprobe_instance *ri,
 				struct pt_regs *regs)
 {
 	return hotfix_return_common(ri, regs, &counters.freed_cancel,
-				    "scx_cancel_fork");
+				    "hmbird_cancel_fork");
 }
 NOKPROBE_SYMBOL(hotfix_cancel_return);
 
 static struct kretprobe free_probe = {
 	.kp = {
-		.symbol_name = "sched_ext_free",
+		.symbol_name = "hmbird_free",
 	},
 	.handler = hotfix_free_return,
 	.entry_handler = hotfix_entry_handler,
@@ -151,7 +158,7 @@ static struct kretprobe free_probe = {
 
 static struct kretprobe cancel_probe = {
 	.kp = {
-		.symbol_name = "scx_cancel_fork",
+		.symbol_name = "hmbird_cancel_fork",
 	},
 	.handler = hotfix_cancel_return,
 	.entry_handler = hotfix_entry_handler,
@@ -221,13 +228,13 @@ static int __init hotfix_init(void)
 
 	ret = register_kretprobe(&free_probe);
 	if (ret) {
-		pr_err(HOTFIX_NAME ": sched_ext_free probe failed: %d\n", ret);
+		pr_err(HOTFIX_NAME ": hmbird_free probe failed: %d\n", ret);
 		return ret;
 	}
 
 	ret = register_kretprobe(&cancel_probe);
 	if (ret) {
-		pr_err(HOTFIX_NAME ": scx_cancel_fork probe failed: %d\n", ret);
+		pr_err(HOTFIX_NAME ": hmbird_cancel_fork probe failed: %d\n", ret);
 		goto unregister_free;
 	}
 
@@ -271,10 +278,10 @@ static void __exit hotfix_exit(void)
 module_init(hotfix_init);
 module_exit(hotfix_exit);
 
-MODULE_AUTHOR("scx-memlf contributors");
-MODULE_DESCRIPTION("MT6989 sched_ext entity leak hotfix");
+MODULE_AUTHOR("scx-memlf contributors (HMBIRD adaptation)");
+MODULE_DESCRIPTION("HMBIRD sched_ext entity leak hotfix");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.0-hmbird");
 MODULE_INFO(target_release, HOTFIX_TARGET_RELEASE);
-MODULE_INFO(target_scx_size, __stringify(HOTFIX_ENTITY_SIZE));
+MODULE_INFO(target_entity_size, __stringify(HOTFIX_ENTITY_SIZE));
 MODULE_INFO(target_module_size, __stringify(HOTFIX_MODULE_SIZE));

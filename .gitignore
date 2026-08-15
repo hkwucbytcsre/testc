@@ -1,0 +1,23 @@
+# Kbuild output
+*.a
+*.cmd
+*.ko
+*.mod
+*.mod.c
+*.o
+*.order
+.*.cmd
+.tmp_versions/
+Module.markers
+modules.order
+Module.symvers
+
+# ci/Module.symvers is a recovered target ABI input, not build output.
+!ci/Module.symvers
+
+# Large local inputs and captures, not source.
+vmlinux
+pstore/
+
+# Session tooling state.
+.lcm/

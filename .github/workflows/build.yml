@@ -20,8 +20,9 @@ on:
 
 env:
   KERNEL_REPO: cctv18/android_kernel_common_oneplus_sm8750
-  VENDOR_REPO: oneplus/sm8750_b_16.0.0_oneplus_13_6.6.118
-  KERNEL_BRANCH: oneplus/sm8750_b_16.0.0_oneplus_13
+  VENDOR_REPO: OnePlusOSS/android_kernel_oneplus_sm8750
+  KERNEL_BRANCH: oneplus/sm8750_b_16.0.0_oneplus_13_6.6.118
+  VENDOR_BRANCH: oneplus/sm8750_b_16.0.0_oneplus_13
   KERNEL_REF: ${{ github.event.inputs.kernel_ref || '4adecf773de4580140b120843859bac06fb78bbd' }}
   CLANG_VERSION: clang-r510928
   KERNEL_BASE_VERSION: 6.6.118
@@ -97,7 +98,7 @@ jobs:
         # The kernel tree has dangling symlinks into ../vendor/... which must
         # resolve before modules_prepare will run.
         run: |
-          git clone --depth=1 --branch "$KERNEL_BRANCH" \
+          git clone --depth=1 --branch "$VENDOR_BRANCH" \
             "https://github.com/$VENDOR_REPO.git" vendor-src
           ln -s "$PWD/vendor-src/vendor" "$PWD/vendor"
 

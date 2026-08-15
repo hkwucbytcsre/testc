@@ -41,7 +41,7 @@
 #define HOTFIX_NAME                    "scx_leak_hotfix"
 #define HOTFIX_TARGET_RELEASE          "6.6.118-android15-8-g29d86c5fc9dd-abogki428889875-4k"
 #define HOTFIX_ENTITY_SIZE             232
-#define HOTFIX_MODULE_SIZE             1088
+#define HOTFIX_MODULE_SIZE             1536
 #define HOTFIX_MAXACTIVE               256
 
 static_assert(sizeof(struct sched_ext_entity) == HOTFIX_ENTITY_SIZE);

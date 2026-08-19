@@ -17,35 +17,49 @@ require_literal()
 
 test -f "$SRC" || fail "missing scx_leak_hotfix.c"
 
-# Vendor Hook specific checks
-require_literal 'register_trace_android_vh_free_task'
-require_literal 'unregister_trace_android_vh_free_task'
-require_literal 'android_vh_free_task'
-require_literal 'kfree(ent)'
+# Required header inclusions
+require_literal '#include <linux/sched/hmbird.h>'
+require_literal '#include <trace/hooks/sched.h>'
+
+# Vendor hook registration / unregistration
+require_literal 'register_trace_android_vh_free_task(hotfix_free_task, NULL)'
+require_literal 'unregister_trace_android_vh_free_task(hotfix_free_task, NULL)'
+require_literal 'tracepoint_synchronize_unregister()'
+
+# Core logic patterns
 require_literal 'READ_ONCE(ent->task) != task'
-require_literal 'cmpxchg(&task->android_oem_data1[HMBIRD_TS_IDX]'
+if ! grep -Eq 'cmpxchg\s*\(\s*&task->android_oem_data1\s*\[\s*HMBIRD_TS_IDX\s*\]\s*,\s*old_ptr\s*,\s*0\s*\)' "$SRC"; then
+    fail "missing source contract: cmpxchg for android_oem_data1 slot"
+fi
+require_literal 'kfree(ent)'
+
+# Compile-time size assertions
+require_literal 'static_assert(sizeof(struct hmbird_entity) == HOTFIX_ENTITY_SIZE)'
 require_literal 'static_assert(sizeof(struct module) == HOTFIX_MODULE_SIZE)'
-require_literal 'atomic64_inc(&counters.freed)'
+
+# Ensure no legacy kprobe/kretprobe usage remains
+if grep -Eq 'kretprobe|register_kprobe|<linux/kprobes\.h>' "$SRC"; then
+	fail "kprobe/kretprobe usage is forbidden in the production module"
+fi
 
 if grep -Eq '\.addr[[:space:]]*=' "$SRC"; then
 	fail "hard-coded probe addresses are forbidden"
 fi
 
+# Shell script syntax checks
 for script in "$ROOT"/scripts/*.sh "$ROOT"/tools/*.sh; do
 	test -f "$script" || continue
 	sh -n "$script" || fail "shell syntax: $script"
 done
 
+# Python script syntax checks
 for script in "$ROOT"/tools/*.py; do
 	test -f "$script" || continue
 	python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$script" ||
 		fail "python syntax: $script"
 done
 
-# The target config carries CONFIG_LOCALVERSION="" with LOCALVERSION_AUTO=y,
-# so any build that does not override both ends up with a git-derived release
-# and a vermagic the target kernel rejects. CI hit exactly this, so assert the
-# workflow still sets them.
+# Check that CI workflow still sets LOCALVERSION correctly
 WORKFLOW="$ROOT/.github/workflows/build.yml"
 if [ -f "$WORKFLOW" ]; then
 	grep -Fq -- '--set-str LOCALVERSION' "$WORKFLOW" ||

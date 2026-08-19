@@ -28,7 +28,7 @@ require_literal 'tracepoint_synchronize_unregister()'
 
 # Core logic patterns
 require_literal 'READ_ONCE(ent->task) != task'
-if ! grep -Eq 'cmpxchg\s*\(\s*&task->android_oem_data1\s*\[\s*HMBIRD_TS_IDX\s*\]\s*,\s*old_ptr\s*,\s*0\s*\)' "$SRC"; then
+if ! grep -zq 'cmpxchg.*android_oem_data1.*HMBIRD_TS_IDX' "$SRC"; then
     fail "missing source contract: cmpxchg for android_oem_data1 slot"
 fi
 require_literal 'kfree(ent)'

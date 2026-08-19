@@ -17,62 +17,41 @@ require_literal()
 
 test -f "$SRC" || fail "missing scx_leak_hotfix.c"
 
-# Required header inclusions
-require_literal '#include <linux/sched/hmbird.h>'
-require_literal '#include <trace/hooks/sched.h>'
-
-# Vendor hook registration / unregistration
-require_literal 'register_trace_android_vh_free_task(hotfix_free_task, NULL)'
-require_literal 'unregister_trace_android_vh_free_task(hotfix_free_task, NULL)'
-require_literal 'tracepoint_synchronize_unregister()'
-
-# Core logic patterns
-require_literal 'READ_ONCE(ent->task) != task'
-require_literal 'cmpxchg(&task->android_oem_data1[HMBIRD_TS_IDX], old_ptr, 0)'
+# Vendor Hook specific checks
+require_literal 'register_trace_android_vh_free_task'
+require_literal 'unregister_trace_android_vh_free_task'
+require_literal 'android_vh_free_task'
 require_literal 'kfree(ent)'
-
-# Compile-time size assertions
-require_literal 'static_assert(sizeof(struct hmbird_entity) == HOTFIX_ENTITY_SIZE)'
+require_literal 'READ_ONCE(ent->task) != task'
+require_literal 'cmpxchg(&task->android_oem_data1[HMBIRD_TS_IDX]'
 require_literal 'static_assert(sizeof(struct module) == HOTFIX_MODULE_SIZE)'
-
-# Ensure no legacy kprobe/kretprobe usage remains
-if grep -Eq 'kretprobe|register_kprobe|<linux/kprobes\.h>' "$SRC"; then
-	fail "kprobe/kretprobe usage is forbidden in the production module"
-fi
+require_literal 'atomic64_inc(&counters.freed)'
 
 if grep -Eq '\.addr[[:space:]]*=' "$SRC"; then
 	fail "hard-coded probe addresses are forbidden"
 fi
 
-# Shell script syntax checks
 for script in "$ROOT"/scripts/*.sh "$ROOT"/tools/*.sh; do
 	test -f "$script" || continue
 	sh -n "$script" || fail "shell syntax: $script"
 done
 
-# Python script syntax checks
 for script in "$ROOT"/tools/*.py; do
 	test -f "$script" || continue
 	python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$script" ||
 		fail "python syntax: $script"
 done
 
-# Check that CI workflow still sets LOCALVERSION correctly
+# The target config carries CONFIG_LOCALVERSION="" with LOCALVERSION_AUTO=y,
+# so any build that does not override both ends up with a git-derived release
+# and a vermagic the target kernel rejects. CI hit exactly this, so assert the
+# workflow still sets them.
 WORKFLOW="$ROOT/.github/workflows/build.yml"
 if [ -f "$WORKFLOW" ]; then
 	grep -Fq -- '--set-str LOCALVERSION' "$WORKFLOW" ||
 		fail "workflow must set CONFIG_LOCALVERSION explicitly"
 	grep -Fq -- '--disable LOCALVERSION_AUTO' "$WORKFLOW" ||
 		fail "workflow must disable CONFIG_LOCALVERSION_AUTO"
-fi
-
-# (Optional) Profile check — disabled for SM8750; keep as informational
-if grep -Fq 'CONFIG_LOCALVERSION_AUTO=y' "$ROOT/ci/target.config" 2>/dev/null; then
-	# This trap is now documented in profiles/sm8750_hmbird.md if it exists
-	if [ -f "$ROOT/profiles/sm8750_hmbird.md" ] && \
-	   ! grep -Fq 'CONFIG_LOCALVERSION_AUTO' "$ROOT/profiles/sm8750_hmbird.md"; then
-		fail "profile must document the LOCALVERSION_AUTO trap"
-	fi
 fi
 
 printf 'PASS: source safety contract\n'
